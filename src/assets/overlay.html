@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Squat Reminder</title>
+<style>
+@font-face {
+  font-family: 'BebasNeue';
+  src: url('font.ttf') format('truetype');
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: transparent;
+  font-family: 'BebasNeue', Impact, 'Arial Black', sans-serif;
+}
+
+canvas {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  will-change: contents;
+  contain: strict;
+}
+#plasma-canvas { z-index: 0; }
+#main-canvas { z-index: 1; }
+
+#content {
+  position: relative;
+  z-index: 2;
+  width: 100%; height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+#main-text {
+  font-size: clamp(3rem, 11vw, 14rem);
+  font-weight: bold;
+  color: #fff;
+  text-align: center;
+  line-height: 1.1;
+  padding: 0 5vw;
+  text-shadow:
+    0 0 20px #0ff,
+    0 0 40px #0ff,
+    0 0 60px rgba(0,180,255,0.7),
+    0 0 100px rgba(0,120,255,0.4);
+  animation: textGlow 2s ease-in-out infinite alternate;
+  user-select: none;
+}
+
+@keyframes textGlow {
+  from {
+    text-shadow:
+      0 0 20px #0ff,
+      0 0 40px #0ff,
+      0 0 60px rgba(0,180,255,0.7),
+      0 0 100px rgba(0,120,255,0.4);
+  }
+  to {
+    text-shadow:
+      0 0 30px #0ff,
+      0 0 70px #0ff,
+      0 0 100px rgba(0,180,255,0.9),
+      0 0 150px rgba(0,120,255,0.6);
+  }
+}
+
+#buttons {
+  margin-top: 6vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  pointer-events: auto;
+}
+
+.btn {
+  padding: 18px 60px;
+  font-family: 'BebasNeue', Impact, 'Arial Black', sans-serif;
+  font-size: clamp(1.2rem, 2.5vw, 2.2rem);
+  font-weight: bold;
+  letter-spacing: 2px;
+  color: #fff;
+  background: rgba(15, 15, 35, 0.85);
+  border: 3px solid #0ff;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.25s;
+  box-shadow:
+    0 0 20px rgba(0,255,255,0.4),
+    inset 0 0 15px rgba(0,255,255,0.08);
+  user-select: none;
+}
+.btn:hover {
+  transform: scale(1.06);
+  box-shadow:
+    0 0 40px rgba(0,255,255,0.7),
+    inset 0 0 25px rgba(0,255,255,0.15);
+}
+
+.btn-secondary {
+  font-size: clamp(1rem, 1.8vw, 1.5rem);
+  padding: 12px 40px;
+  border-color: #668;
+  box-shadow:
+    0 0 10px rgba(100,100,180,0.25),
+    inset 0 0 8px rgba(100,100,180,0.06);
+}
+.btn-secondary:hover {
+  border-color: #99b;
+  box-shadow:
+    0 0 25px rgba(130,130,220,0.5),
+    inset 0 0 15px rgba(130,130,220,0.1);
+}
+
+#emergency-dismiss {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 10;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid rgba(80, 140, 255, 0.6);
+  background: rgb(15, 15, 40);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.3s ease, border-color 0.3s ease, background 0.3s ease;
+  pointer-events: auto;
+}
+#emergency-dismiss:hover {
+  border-color: rgba(100, 170, 255, 0.9);
+  background: rgb(30, 30, 60);
+  transform: scale(2);
+}
+#emergency-dismiss svg {
+  width: 20px;
+  height: 20px;
+}
+</style>
+</head>
+<body>
+
+<canvas id="plasma-canvas"></canvas>
+<canvas id="main-canvas"></canvas>
+
+<div id="content">
+  <div id="main-text">YOUR WIFE SAYS<br>TO SQUAT</div>
+  <div id="buttons">
+    <button class="btn" id="dismiss-btn">I DID MY 10 SQUATS</button>
+    <button class="btn btn-secondary" id="snooze-btn">SNOOZE (3 HOURS)</button>
+  </div>
+</div>
+
+<button id="emergency-dismiss" title="Dismiss now">
+  <svg viewBox="0 0 20 20" fill="none" stroke="rgba(80,140,255,0.9)" stroke-width="2.5" stroke-linecap="round">
+    <line x1="5" y1="5" x2="15" y2="15"/><line x1="15" y1="5" x2="5" y2="15"/>
+  </svg>
+</button>
+
+<script>
+// ── Constants ───────────────────────────────────────────────────────
+const W = window.innerWidth, H = window.innerHeight;
+const FADE_IN_DURATION = 10000;
+const startTime = performance.now();
+let masterAlpha = 0;
+let fadingOut = false;
+let fadeOutStart = 0;
+
+// ── Canvas setup (only 2 canvases!) ─────────────────────────────────
+const plasmaCanvas = document.getElementById('plasma-canvas');
+const mainCanvas = document.getElementById('main-canvas');
+plasmaCanvas.width = W; plasmaCanvas.height = H;
+mainCanvas.width = W; mainCanvas.height = H;
+
+const ctx = mainCanvas.getContext('2d');
+
+// ══════════════════════════════════════════════════════════════════════
+// PLASMA — WebGL fragment shader (GPU-accelerated simplex noise)
+// ══════════════════════════════════════════════════════════════════════
+const gl = plasmaCanvas.getContext('webgl', { alpha: true, premultipliedAlpha: false });
+
+const vsSource = `attribute vec2 a_pos; void main(){gl_Position=vec4(a_pos,0,1);}`;
+const fsSource = `
+precision mediump float;
+uniform float u_time;
+uniform vec2 u_res;
+uniform float u_alpha;
+
+vec3 mod289(vec3 x){return x-floor(x*(1.0/289.0))*289.0;}
+vec2 mod289(vec2 x){return x-floor(x*(1.0/289.0))*289.0;}
+vec3 permute(vec3 x){return mod289(((x*34.0)+1.0)*x);}
+
+float snoise(vec2 v){
+  const vec4 C=vec4(0.211324865405187,0.366025403784439,-0.577350269189626,0.024390243902439);
+  vec2 i=floor(v+dot(v,C.yy));
+  vec2 x0=v-i+dot(i,C.xx);
+  vec2 i1=(x0.x>x0.y)?vec2(1,0):vec2(0,1);
+  vec4 x12=x0.xyxy+C.xxzz; x12.xy-=i1;
+  i=mod289(i);
+  vec3 p=permute(permute(i.y+vec3(0,i1.y,1))+i.x+vec3(0,i1.x,1));
+  vec3 m=max(0.5-vec3(dot(x0,x0),dot(x12.xy,x12.xy),dot(x12.zw,x12.zw)),0.0);
+  m=m*m; m=m*m;
+  vec3 x=2.0*fract(p*C.www)-1.0;
+  vec3 h=abs(x)-0.5;
+  vec3 ox=floor(x+0.5);
+  vec3 a0=x-ox;
+  m*=1.79284291400159-0.85373472095314*(a0*a0+h*h);
+  vec3 g; g.x=a0.x*x0.x+h.x*x0.y; g.yz=a0.yz*x12.xz+h.yz*x12.yw;
+  return 130.0*dot(m,g);
+}
+
+void main(){
+  vec2 uv=gl_FragCoord.xy/u_res;
+  float t=u_time*0.0003;
+  float v=snoise(uv*4.0+vec2(t,t*0.7))+0.5*snoise(uv*8.0+vec2(-t*0.5,t*0.3));
+  float n=(v+1.5)/3.0;
+  vec3 col=vec3(n*0.157, n*0.078, n*0.314+0.078);
+  gl_FragColor=vec4(col, 0.2*u_alpha);
+}`;
+
+function compileShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, vsSource));
+gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'a_pos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const uTime = gl.getUniformLocation(prog, 'u_time');
+const uRes = gl.getUniformLocation(prog, 'u_res');
+const uAlpha = gl.getUniformLocation(prog, 'u_alpha');
+gl.uniform2f(uRes, W, H);
+gl.enable(gl.BLEND);
+gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+gl.clearColor(0, 0, 0, 0);
+
+function drawPlasma(time) {
+  gl.uniform1f(uTime, time);
+  gl.uniform1f(uAlpha, masterAlpha);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// PRE-RENDERED GLOW SPRITES (replaces shadowBlur entirely)
+// ══════════════════════════════════════════════════════════════════════
+function createGlowSprite(radius, r, g, b, glowR, glowG, glowB) {
+  const size = radius * 8;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const cx = c.getContext('2d');
+  const half = size / 2;
+  // Glow layers — concentric circles, no shadowBlur
+  const steps = 6;
+  for (let i = steps; i >= 0; i--) {
+    const rad = radius + (radius * 2.5) * (i / steps);
+    const alpha = 0.18 * (1 - i / steps);
+    cx.fillStyle = `rgba(${glowR},${glowG},${glowB},${alpha})`;
+    cx.beginPath();
+    cx.arc(half, half, rad, 0, Math.PI * 2);
+    cx.fill();
+  }
+  // Bright core
+  cx.fillStyle = `rgba(${r},${g},${b},1)`;
+  cx.beginPath();
+  cx.arc(half, half, radius, 0, Math.PI * 2);
+  cx.fill();
+  return c;
+}
+
+const sparkSprite = createGlowSprite(3, 200, 230, 255, 100, 200, 255);
+const snowSprite = createGlowSprite(3, 180, 210, 255, 150, 180, 255);
+const emberSprite = createGlowSprite(3, 255, 180, 50, 255, 100, 20);
+const emberHotSprite = createGlowSprite(3, 255, 240, 150, 255, 160, 40);
+
+// ══════════════════════════════════════════════════════════════════════
+// BACKGROUND — pre-rendered blob sprite + drifting positions
+// ══════════════════════════════════════════════════════════════════════
+const blobSprite = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const cx = c.getContext('2d');
+  const g = cx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  g.addColorStop(0, 'rgba(8,4,18,0.12)');
+  g.addColorStop(1, 'rgba(8,4,18,0)');
+  cx.fillStyle = g;
+  cx.fillRect(0, 0, 256, 256);
+  return c;
+})();
+
+const bgBlobs = [];
+for (let i = 0; i < 8; i++) {
+  bgBlobs.push({
+    x: Math.random() * W, y: Math.random() * H,
+    r: 200 + Math.random() * 400,
+    vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.2,
+    phase: Math.random() * Math.PI * 2,
+  });
+}
+
+function drawBackground(now) {
+  // Base dark fill
+  ctx.fillStyle = `rgba(8,4,18,${0.88 * masterAlpha})`;
+  ctx.fillRect(0, 0, W, H);
+  // Morphing blobs via pre-rendered sprite
+  const t = now * 0.0005;
+  for (const b of bgBlobs) {
+    b.x += b.vx; b.y += b.vy;
+    if (b.x < -b.r) b.x = W + b.r;
+    if (b.x > W + b.r) b.x = -b.r;
+    if (b.y < -b.r) b.y = H + b.r;
+    if (b.y > H + b.r) b.y = -b.r;
+    const pulse = Math.sin(t + b.phase);
+    ctx.globalAlpha = masterAlpha * (pulse > 0 ? 0.6 : 1.0);
+    ctx.drawImage(blobSprite, b.x - b.r, b.y - b.r, b.r * 2, b.r * 2);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// LIGHTNING — no shadowBlur, multi-stroke glow layers
+// ══════════════════════════════════════════════════════════════════════
+// Simplex noise for bolt generation (lightweight, only used on regeneration)
+const SimplexNoise = (() => {
+  const F2 = 0.5*(Math.sqrt(3)-1), G2 = (3-Math.sqrt(3))/6;
+  const grad3 = [[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
+  class SN {
+    constructor(seed) {
+      this.perm = new Uint8Array(512);
+      const p = new Uint8Array(256);
+      for (let i=0;i<256;i++) p[i]=i;
+      seed = seed||42;
+      for (let i=255;i>0;i--) { seed=(seed*16807)%2147483647; const j=seed%(i+1); [p[i],p[j]]=[p[j],p[i]]; }
+      for (let i=0;i<512;i++) this.perm[i]=p[i&255];
+    }
+    noise2D(x,y) {
+      const s=(x+y)*F2; const i=Math.floor(x+s),j=Math.floor(y+s);
+      const t=(i+j)*G2; const X0=i-t,Y0=j-t; const x0=x-X0,y0=y-Y0;
+      const i1=x0>y0?1:0,j1=x0>y0?0:1;
+      const x1=x0-i1+G2,y1=y0-j1+G2,x2=x0-1+2*G2,y2=y0-1+2*G2;
+      const ii=i&255,jj=j&255;
+      let n0=0,n1=0,n2=0;
+      let t0=0.5-x0*x0-y0*y0;
+      if(t0>0){t0*=t0;const g=grad3[this.perm[ii+this.perm[jj]]&7];n0=t0*t0*(g[0]*x0+g[1]*y0);}
+      let t1=0.5-x1*x1-y1*y1;
+      if(t1>0){t1*=t1;const g=grad3[this.perm[ii+i1+this.perm[jj+j1]]&7];n1=t1*t1*(g[0]*x1+g[1]*y1);}
+      let t2=0.5-x2*x2-y2*y2;
+      if(t2>0){t2*=t2;const g=grad3[this.perm[ii+1+this.perm[jj+1]]&7];n2=t2*t2*(g[0]*x2+g[1]*y2);}
+      return 70*(n0+n1+n2);
+    }
+  }
+  return SN;
+})();
+const noise = new SimplexNoise(42);
+
+class Bolt {
+  constructor() {
+    this.x = Math.random() * W;
+    this.intensity = 1;
+    this.phase = 0;
+    this.timer = 0;
+    this.strikeLen = 150 + Math.random() * 100;
+    this.sustainLen = 800 + Math.random() * 1200;
+    this.fadeLen = 600 + Math.random() * 800;
+    this.restLen = 300 + Math.random() * 1500;
+    this.segments = [];
+    this.branches = [];
+    this.targetSegments = [];
+    this.generate();
+    this._snapshotTarget();
+  }
+
+  generate() {
+    this.segments = []; this.branches = [];
+    const startX = this.x + (Math.random()-0.5)*100;
+    const endX = startX + (Math.random()-0.5)*200;
+    const endY = H * (0.38 + Math.random()*0.18);
+    const steps = 35, t0 = Math.random()*1000;
+    for (let i=0; i<=steps; i++) {
+      const frac = i/steps;
+      const bx = startX + (endX-startX)*frac;
+      const by = frac * endY;
+      const offset = noise.noise2D(bx*0.008+t0, by*0.008)*60*(1-Math.abs(frac-0.5)*1.2);
+      this.segments.push({x:bx+offset, y:by});
+      if (Math.random()<0.22 && i>4 && i<steps-4) this._branch(bx+offset, by, 1);
+    }
+  }
+
+  _branch(sx, sy, depth) {
+    if (depth>2) return;
+    const segs=[], n=10, ang=(Math.random()-0.5)*1.2, len=80/depth;
+    for (let i=0;i<=n;i++) {
+      const frac=i/n;
+      segs.push({
+        x: sx+Math.sin(ang)*len*frac+noise.noise2D(sx*0.01+i,sy*0.01)*18,
+        y: sy+Math.cos(ang*0.3)*len*frac
+      });
+    }
+    this.branches.push(segs);
+    if (Math.random()<0.3 && segs.length>3) {
+      const mid=segs[Math.floor(segs.length/2)];
+      this._branch(mid.x, mid.y, depth+1);
+    }
+  }
+
+  _snapshotTarget() {
+    this.targetSegments = this.segments.map(s => ({
+      x: s.x + (Math.random()-0.5)*30,
+      y: s.y + (Math.random()-0.5)*10,
+    }));
+  }
+
+  update(dt) {
+    this.timer += dt;
+    if (this.phase===0) {
+      this.intensity = Math.min(1, this.timer/this.strikeLen);
+      if (this.timer>this.strikeLen) { this.phase=1; this.timer=0; }
+    } else if (this.phase===1) {
+      this.intensity = 0.75 + Math.sin(this.timer*0.008)*0.2;
+      if (this.timer>this.sustainLen) { this.phase=2; this.timer=0; }
+    } else if (this.phase===2) {
+      this.intensity = 0.7*(1-this.timer/this.fadeLen);
+      if (this.timer>this.fadeLen) { this.phase=3; this.timer=0; this.intensity=0; }
+    } else {
+      this.intensity = 0;
+      if (this.timer>this.restLen) {
+        this.phase=0; this.timer=0;
+        this.x=Math.random()*W;
+        this.strikeLen=150+Math.random()*100;
+        this.sustainLen=800+Math.random()*1200;
+        this.fadeLen=600+Math.random()*800;
+        this.restLen=300+Math.random()*1500;
+        this.generate(); this._snapshotTarget();
+      }
+    }
+    // Smooth drift via lerp
+    const lerpSpeed = 0.02;
+    for (let i=0; i<this.segments.length && i<this.targetSegments.length; i++) {
+      this.segments[i].x += (this.targetSegments[i].x - this.segments[i].x)*lerpSpeed;
+      this.segments[i].y += (this.targetSegments[i].y - this.segments[i].y)*lerpSpeed;
+    }
+    if (Math.random()<0.01) this._snapshotTarget();
+  }
+
+  draw(c) {
+    const a = Math.max(0, this.intensity) * masterAlpha;
+    if (a<0.01) return;
+    this._drawPath(c, this.segments, a);
+    for (const b of this.branches) this._drawPath(c, b, a*0.6);
+  }
+
+  // NO shadowBlur — multi-stroke glow layers instead
+  _drawPath(c, segs, a) {
+    if (segs.length<2 || a<0.01) return;
+    c.save();
+    c.globalCompositeOperation = 'lighter';
+    // Outer purple glow (3 strokes, wide to narrow)
+    const outerW = [28, 22, 18];
+    const outerA = [0.04, 0.08, 0.12];
+    for (let i=0; i<3; i++) {
+      c.strokeStyle = `rgba(100,50,255,${outerA[i]*a})`;
+      c.lineWidth = outerW[i];
+      this._stroke(c, segs);
+    }
+    // Inner cyan glow (3 strokes)
+    const innerW = [16, 10, 7];
+    const innerA = [0.1, 0.25, 0.5];
+    for (let i=0; i<3; i++) {
+      c.strokeStyle = `rgba(0,220,255,${innerA[i]*a})`;
+      c.lineWidth = innerW[i];
+      this._stroke(c, segs);
+    }
+    // White core
+    c.strokeStyle = `rgba(255,255,255,${a})`;
+    c.lineWidth = 2.5;
+    this._stroke(c, segs);
+    c.restore();
+  }
+
+  _stroke(c, segs) {
+    c.beginPath();
+    c.moveTo(segs[0].x, segs[0].y);
+    for (let i=1; i<segs.length; i++) c.lineTo(segs[i].x, segs[i].y);
+    c.stroke();
+  }
+}
+
+const bolts = Array.from({length:6}, () => new Bolt());
+
+// ══════════════════════════════════════════════════════════════════════
+// PARTICLES — pre-rendered sprites, no shadowBlur, batched by type
+// ══════════════════════════════════════════════════════════════════════
+class Particle {
+  constructor(spark) { this.spark = spark; this.reset(); }
+  reset() {
+    this.x = this.spark ? Math.random()*W : -10;
+    this.y = this.spark ? Math.random()*H*0.5 : Math.random()*H;
+    this.vx = this.spark ? (Math.random()-0.2)*10 : 1.5+Math.random()*2.5;
+    this.vy = this.spark ? 2+Math.random()*7 : (Math.random()-0.5)*0.8;
+    this.size = this.spark ? 1+Math.random()*2.5 : 1+Math.random()*3;
+    this.life = 1;
+    this.decay = this.spark ? 0.008+Math.random()*0.015 : 0.001+Math.random()*0.002;
+    this.brightness = 0.4+Math.random()*0.6;
+  }
+  update() {
+    this.x += this.vx; this.y += this.vy;
+    if (this.spark) { this.vx*=0.99; this.vy+=0.05; }
+    else { this.vx+=(Math.random()-0.48)*0.1; this.vy+=(Math.random()-0.5)*0.04; }
+    this.life -= this.decay;
+    if (this.life<=0 || this.x>W+20 || this.y>H+20 || this.x<-20) this.reset();
+  }
+}
+
+class Ember {
+  constructor() { this.reset(); }
+  reset() {
+    this.x = Math.random() * W;
+    this.y = H * (0.6 + Math.random() * 0.4);
+    this.vx = (Math.random() - 0.5) * 1.5;
+    this.vy = -(1.5 + Math.random() * 3);
+    this.size = 1.5 + Math.random() * 2.5;
+    this.life = 1;
+    this.decay = 0.003 + Math.random() * 0.006;
+    this.flickerSpeed = 8 + Math.random() * 12;
+    this.flickerPhase = Math.random() * Math.PI * 2;
+    this.hot = Math.random() < 0.4;  // 40% burn extra bright white-hot
+  }
+  update(now) {
+    this.x += this.vx + Math.sin(now * 0.002 + this.flickerPhase) * 0.3;
+    this.y += this.vy;
+    this.vy *= 0.998;
+    this.vx += (Math.random() - 0.5) * 0.15;
+    this.life -= this.decay;
+    // Flicker intensity
+    this.flicker = 0.5 + 0.5 * Math.sin(now * 0.001 * this.flickerSpeed + this.flickerPhase);
+    if (this.life <= 0 || this.y < -20 || this.x < -20 || this.x > W + 20) this.reset();
+  }
+}
+
+const snowParticles = [];
+const sparkParticles = [];
+const emberParticles = [];
+for (let i=0;i<120;i++) snowParticles.push(new Particle(false));
+for (let i=0;i<45;i++) sparkParticles.push(new Particle(true));  // reduced from 60
+for (let i=0;i<30;i++) emberParticles.push(new Ember());
+
+function drawParticles(c) {
+  const now = performance.now();
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  for (const p of snowParticles) {
+    p.update();
+    const a = p.life * p.brightness * masterAlpha;
+    if (a<0.01) continue;
+    c.globalAlpha = a;
+    const s = p.size * 2;
+    c.drawImage(snowSprite, p.x-s*4, p.y-s*4, s*8, s*8);
+  }
+  for (const p of sparkParticles) {
+    p.update();
+    const a = p.life * p.brightness * masterAlpha;
+    if (a<0.01) continue;
+    c.globalAlpha = a;
+    const s = p.size * 2;
+    c.drawImage(sparkSprite, p.x-s*4, p.y-s*4, s*8, s*8);
+  }
+  // Embers — flickering orange/white-hot rising particles
+  for (const e of emberParticles) {
+    e.update(now);
+    const a = e.life * e.flicker * masterAlpha;
+    if (a<0.01) continue;
+    c.globalAlpha = a;
+    const s = e.size * 2;
+    const sprite = e.hot && e.flicker > 0.7 ? emberHotSprite : emberSprite;
+    c.drawImage(sprite, e.x-s*4, e.y-s*4, s*8, s*8);
+  }
+  c.globalAlpha = 1;
+  c.restore();
+}
+
+// ── Content fade ────────────────────────────────────────────────────
+const content = document.getElementById('content');
+content.style.opacity = '0';
+content.style.transition = 'opacity 0.3s';
+
+// ══════════════════════════════════════════════════════════════════════
+// LIGHTNING FLASH — radial light explosion with rays and scattered dots
+// ══════════════════════════════════════════════════════════════════════
+const FLASH_PEAK = 100;      // ms at full brightness
+const FLASH_FADE = 600;      // ms fade-out
+const FLASH_TOTAL = FLASH_PEAK + FLASH_FADE;
+
+// Explosion center (slightly off-center for natural feel)
+const flashCX = W * (0.42 + Math.random() * 0.16);
+const flashCY = H * (0.38 + Math.random() * 0.14);
+
+// Pre-generate light rays — varying lengths and widths
+const flashRays = [];
+const numRays = 60;
+for (let i = 0; i < numRays; i++) {
+  const angle = (i / numRays) * Math.PI * 2 + (Math.random() - 0.5) * 0.15;
+  flashRays.push({
+    angle,
+    len: Math.max(W, H) * (0.3 + Math.random() * 0.7),
+    width: 1 + Math.random() * 4,
+    brightness: 0.3 + Math.random() * 0.7,
+  });
+}
+
+// Pre-generate scattered light dots
+const flashDots = [];
+for (let i = 0; i < 200; i++) {
+  const angle = Math.random() * Math.PI * 2;
+  const dist = 40 + Math.random() * Math.max(W, H) * 0.65;
+  flashDots.push({
+    x: flashCX + Math.cos(angle) * dist,
+    y: flashCY + Math.sin(angle) * dist,
+    r: 1 + Math.random() * 4,
+    brightness: 0.3 + Math.random() * 0.7,
+    // Color tint: most white, some warm yellow
+    warm: Math.random() < 0.4,
+  });
+}
+
+// Pre-render the radial glow sprite
+const flashGlowSprite = (() => {
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const cx = c.getContext('2d');
+  const maxR = Math.max(W, H) * 0.9;
+  const g = cx.createRadialGradient(flashCX, flashCY, 0, flashCX, flashCY, maxR);
+  g.addColorStop(0, 'rgba(255, 255, 255, 1)');
+  g.addColorStop(0.05, 'rgba(255, 255, 240, 0.95)');
+  g.addColorStop(0.15, 'rgba(255, 245, 190, 0.7)');
+  g.addColorStop(0.3, 'rgba(255, 220, 100, 0.4)');
+  g.addColorStop(0.55, 'rgba(255, 180, 40, 0.12)');
+  g.addColorStop(0.8, 'rgba(200, 120, 20, 0.03)');
+  g.addColorStop(1, 'rgba(100, 60, 10, 0)');
+  cx.fillStyle = g;
+  cx.fillRect(0, 0, W, H);
+  return c;
+})();
+
+function drawFlash(c, now) {
+  const elapsed = now - startTime;
+  if (elapsed > FLASH_TOTAL) return;
+
+  let alpha;
+  if (elapsed < FLASH_PEAK) {
+    alpha = 1;
+  } else {
+    const t = (elapsed - FLASH_PEAK) / FLASH_FADE;
+    alpha = (1 - t) * (1 - t);  // ease-out squared
+  }
+  alpha = Math.max(0, alpha) * masterAlpha;
+  if (alpha < 0.01) return;
+
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+
+  // 1. Full-screen radial glow
+  c.globalAlpha = alpha;
+  c.drawImage(flashGlowSprite, 0, 0);
+
+  // 2. Light rays shooting outward from center
+  for (const ray of flashRays) {
+    const endX = flashCX + Math.cos(ray.angle) * ray.len;
+    const endY = flashCY + Math.sin(ray.angle) * ray.len;
+    const grad = c.createLinearGradient(flashCX, flashCY, endX, endY);
+    const a = ray.brightness * alpha;
+    grad.addColorStop(0, `rgba(255, 255, 240, ${a})`);
+    grad.addColorStop(0.3, `rgba(255, 235, 160, ${a * 0.5})`);
+    grad.addColorStop(1, `rgba(255, 200, 60, 0)`);
+    c.strokeStyle = grad;
+    c.lineWidth = ray.width;
+    c.beginPath();
+    c.moveTo(flashCX, flashCY);
+    c.lineTo(endX, endY);
+    c.stroke();
+  }
+
+  // 3. Bright white core
+  c.globalAlpha = alpha;
+  const coreR = Math.min(W, H) * 0.08;
+  const coreGrad = c.createRadialGradient(flashCX, flashCY, 0, flashCX, flashCY, coreR);
+  coreGrad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+  coreGrad.addColorStop(0.5, 'rgba(255, 250, 220, 0.8)');
+  coreGrad.addColorStop(1, 'rgba(255, 230, 150, 0)');
+  c.fillStyle = coreGrad;
+  c.fillRect(flashCX - coreR, flashCY - coreR, coreR * 2, coreR * 2);
+
+  // 4. Scattered light particles
+  for (const d of flashDots) {
+    const a = d.brightness * alpha;
+    if (a < 0.02) continue;
+    c.globalAlpha = a;
+    c.fillStyle = d.warm ? 'rgba(255, 230, 130, 1)' : 'rgba(255, 255, 255, 1)';
+    c.beginPath();
+    c.arc(d.x, d.y, d.r * (0.5 + alpha * 0.5), 0, Math.PI * 2);
+    c.fill();
+  }
+
+  c.restore();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// MAIN ANIMATION LOOP
+// ══════════════════════════════════════════════════════════════════════
+let lastTime = performance.now();
+function animate(now) {
+  const dt = now - lastTime;
+  lastTime = now;
+
+  // Fade in/out
+  if (fadingOut) {
+    masterAlpha = Math.max(0, 1 - (now - fadeOutStart) / 1000);
+  } else {
+    masterAlpha = Math.min(1, (now - startTime) / FADE_IN_DURATION);
+  }
+
+  if (masterAlpha > 0.02) content.style.opacity = String(masterAlpha);
+
+  // Clear main canvas once (bg + lightning + particles all share it)
+  ctx.clearRect(0, 0, W, H);
+
+  // Draw all layers on single Canvas 2D
+  drawBackground(now);
+  for (const b of bolts) { b.update(dt); b.draw(ctx); }
+  drawParticles(ctx);
+
+  // Lightning flash on top of everything
+  drawFlash(ctx, now);
+
+  // Draw plasma on WebGL canvas
+  drawPlasma(now);
+
+  if (fadingOut && masterAlpha <= 0) return;
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+
+// ── Phase Management ────────────────────────────────────────────────
+setTimeout(async () => {
+  jsLog('Phase 2: disabling click-through');
+  try { await window.pywebview.api.enter_phase_2(); } catch(e) {}
+}, 10000);
+
+setTimeout(async () => {
+  try { await window.pywebview.api.dismiss('timeout'); } catch(e) {}
+}, 600000);
+
+// ── Button Handlers ─────────────────────────────────────────────────
+function jsLog(msg) {
+  try { window.pywebview.api.js_log(msg); } catch(e) {}
+}
+
+function fadeAndDismiss(reason, source) {
+  jsLog('Button clicked: ' + source + ' → dismiss reason: ' + reason);
+  fadingOut = true;
+  fadeOutStart = performance.now();
+  setTimeout(async () => {
+    try { await window.pywebview.api.dismiss(reason); } catch(e) {}
+  }, 1100);
+}
+
+document.getElementById('dismiss-btn').addEventListener('click', () => fadeAndDismiss('completed', 'dismiss-btn'));
+document.getElementById('snooze-btn').addEventListener('click', () => fadeAndDismiss('snooze', 'snooze-btn'));
+document.getElementById('emergency-dismiss').addEventListener('click', (e) => {
+  e.stopPropagation();
+  fadeAndDismiss('completed', 'emergency-dismiss');
+});
+</script>
+</body>
+</html>
