@@ -17,7 +17,7 @@ A Python-based application that reminds you to do squats at regular intervals to
 
 ## Note
 
-This project was 100% Agenic Coded using Qwen Code.
+This project was 100% Agenic Coded.
 
 ## Setup
 
